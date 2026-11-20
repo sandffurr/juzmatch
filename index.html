@@ -18,7 +18,7 @@ tailwind.config = {
 };
 </script>
 <style>
-  body { background: #EEF1F8; color: #16213E; font-family: 'Prompt', sans-serif; margin: 0; min-height: 100vh; }
+  body { background: #F7F8FB; color: #16213E; font-family: 'Prompt', sans-serif; margin: 0; min-height: 100vh; }
   .opt { transition: transform .12s ease, background .15s ease, border-color .15s ease; }
   .opt:active { transform: scale(0.99); }
   .opt.on { background: #16213E; color: #fff; border-color: #16213E; }
@@ -47,6 +47,13 @@ tailwind.config = {
   @media (prefers-reduced-motion: reduce) {
     .bar, .reveal-card, .float-soft, .live-ring { animation: none !important; transition: none !important; }
   }
+  :focus-visible { outline: 2px solid #E94560; outline-offset: 2px; }
+  button { cursor: pointer; touch-action: manipulation; }
+  .opt { min-height: 52px; }
+  .opt:hover:not(.on) { border-color: rgba(22,33,62,.4); }
+  @keyframes dotPulse { 0%,100% { opacity: .3; transform: scale(.8); } 50% { opacity: 1; transform: scale(1); } }
+  .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: #E94560; animation: dotPulse 1.6s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
 </style>
 </head>
 <body>
@@ -80,10 +87,7 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && timer && pollFn) pollFn();
 });
 
-const ringHtml = px => `
-  <span class="inline-flex items-center justify-center bg-white p-1.5 rounded-full border border-ink/10" title="กำลังอัปเดตผล" aria-label="กำลังอัปเดตผล">
-    <span class="live-ring" style="width:${px}px;height:${px}px" aria-hidden="true"></span>
-  </span>`;
+const ringHtml = () => `<span class="live-dot" title="อัปเดตสด" aria-label="อัปเดตสด"></span>`;
 
 const S = {
   name: localStorage.getItem('name') || '',
@@ -93,7 +97,7 @@ const S = {
   lastSeenCount: 0,
   adminPin: sessionStorage.getItem('adminPin') || '',
   groups: [], vote: null, voteRes: null, lastRes: null, adminRes: null,
-  round: localStorage.getItem('round') || '', ver: null
+  round: localStorage.getItem('round') || '', ver: null, seen: new Set()
 };
 
 async function api(action, data = {}) {
@@ -122,7 +126,7 @@ function restartRound(r) {
   stopPoll();
   S.round = r; localStorage.setItem('round', r);
   localStorage.removeItem('done');
-  Object.assign(S, { done: false, onlyMine: false, lastSeenCount: 0, vote: null, voteRes: null, lastRes: null, groups: [], ver: null });
+  Object.assign(S, { done: false, onlyMine: false, lastSeenCount: 0, vote: null, voteRes: null, lastRes: null, groups: [], ver: null, seen: new Set() });
   home();
   const m = document.getElementById('msg');
   if (m) m.innerHTML = '<p class="text-sea text-sm mt-3">ผู้จัดงานเริ่มรอบใหม่แล้ว ใส่ชื่อเพื่อเริ่มเล่นอีกครั้งได้เลย</p>';
@@ -141,8 +145,8 @@ function pollSync(fn, ms, scope = 'user') {
 }
 
 const btn = 'rounded-xl px-5 py-3 font-medium transition ';
-const primary = btn + 'bg-rose text-white w-full shadow-sm hover:brightness-105 active:opacity-85 disabled:opacity-40';
-const card = 'bg-white rounded-2xl p-5 shadow-sm border border-ink/5';
+const primary = btn + 'bg-ink text-white w-full hover:bg-ink/90 active:scale-[0.99] disabled:opacity-40';
+const card = 'bg-white rounded-2xl p-5 border border-ink/[0.07]';
 const errBox = m => `<p class="text-rose text-sm mt-3" role="alert">${esc(m)}</p>`;
 
 function cleanReason(reason, isSolo, isTrio) {
@@ -165,11 +169,12 @@ function home() {
   </div>
   <div class="${card} mt-8">
     <label for="nm" class="block font-medium mb-2">อยากให้เพื่อนๆ เรียกว่าอะไร</label>
-    <input id="nm" value="${esc(S.name)}" maxlength="40" placeholder="เช่น แซนด์ / น้องมิ้นท์" class="w-full border border-ink/15 rounded-xl px-4 py-3 bg-mist/40 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose" autocomplete="off">
+    <input id="nm" value="${esc(S.name)}" maxlength="40" placeholder="ชื่อเล่น" class="w-full border border-ink/15 rounded-xl px-4 py-3 bg-mist/40 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose" autocomplete="off" enterkeyhint="go">
     <button id="go" class="${primary} mt-4">ไปต่อกันเลย</button>
     <div id="msg"></div>
   </div>`;
 
+  document.getElementById('nm').onkeydown = e => { if (e.key === 'Enter') document.getElementById('go').click(); };
   document.getElementById('go').onclick = async () => {
     const v = document.getElementById('nm').value.trim();
     if (!v) return document.getElementById('msg').innerHTML = errBox('ขอชื่อไว้นิดนึงนะครับ');
@@ -199,7 +204,7 @@ function home() {
 /* ---------- ทำแบบสอบถาม ---------- */
 async function quiz() {
   stopPoll();
-  app.innerHTML = `<div class="${card} mt-12 text-center text-ink/60">กำลังเตรียมคำถามให้คุณ…</div>`;
+  app.innerHTML = `<div class="${card} mt-12 text-center text-ink/60">กำลังเตรียมคำถาม…</div>`;
   let qs;
   try { qs = (await api('getQuestions')).questions; }
   catch (e) {
@@ -210,72 +215,71 @@ async function quiz() {
     app.innerHTML = `<div class="${card} mt-8 text-center">คำถามกำลังถูกจัดเตรียม รอสักครู่นะ<button class="${primary} mt-4" onclick="quiz()">โหลดใหม่</button></div>`;
     return;
   }
-
+  const KEY = `quiz:${S.round}:${S.name.trim().toLowerCase()}`;
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (_) {}
   const ans = {};
-  app.innerHTML = `
-  <header class="sticky top-0 bg-mist/95 backdrop-blur pt-3 pb-3 z-10 border-b border-ink/5">
-    <div class="flex justify-between items-center text-sm mb-1.5">
-      <span class="font-medium truncate pr-2">คุณ ${esc(S.name)}</span>
-      <span id="cnt" class="text-xs font-medium bg-white px-2.5 py-0.5 rounded-full border border-ink/10">0 / ${qs.length} ข้อ</span>
-    </div>
-    <div class="h-2 bg-ink/10 rounded-full overflow-hidden"><div id="pg" class="bar h-full bg-sea" style="width:0"></div></div>
-    <div id="unans-bar" class="hidden mt-2 flex justify-between items-center text-xs">
-      <span class="text-ink/60">ยังมีข้อที่ยังไม่ได้เลือก</span>
-      <button type="button" id="jump-unans" class="text-rose font-medium underline">พาไปข้อที่ยังว่าง</button>
-    </div>
-  </header>
-  ${qs.map((q, i) => `
-    <section class="${card} mt-4" data-q="${esc(q.id)}">
-      <div class="text-xs font-medium text-sea mb-1">ข้อที่ ${i + 1}</div>
-      <h2 class="font-medium text-base mb-3">${esc(q.text)}</h2>
-      <div class="grid gap-2">
-        ${q.options.map(o => `<button type="button" class="opt text-left border border-ink/15 rounded-xl px-4 py-3 text-sm sm:text-base" data-v="${esc(o)}">${esc(o)}</button>`).join('')}
-      </div>
-    </section>`).join('')}
-  <button id="send" class="${primary} mt-6">ส่งคำตอบและไปรอลุ้น</button>
-  <div id="msg"></div>`;
+  qs.forEach(q => { if (saved.ans && q.options.includes(saved.ans[q.id])) ans[q.id] = saved.ans[q.id]; });
+  let i = Math.max(0, Math.min(saved.i || 0, qs.length)), busy = false;
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ ans, i })); } catch (_) {} };
+  const head = () => `<div class="sticky top-0 z-10 -mx-4 px-4 pt-3 pb-3 bg-[#F7F8FB]/95 backdrop-blur">
+    <div class="flex justify-between items-center text-xs text-ink/55 mb-2"><span class="truncate pr-3">${esc(S.name)}</span><span>${Math.min(i + 1, qs.length)} / ${qs.length}</span></div>
+    <div class="h-1 bg-ink/10 rounded-full overflow-hidden"><div class="bar h-full bg-ink" style="width:${Math.min(i, qs.length) / qs.length * 100}%"></div></div>
+  </div>`;
 
-  const updateProgress = () => {
-    const n = Object.keys(ans).length;
-    document.getElementById('cnt').textContent = `${n} / ${qs.length} ข้อ`;
-    document.getElementById('pg').style.width = (n / qs.length * 100) + '%';
-    const bar = document.getElementById('unans-bar');
-    if (bar) bar.classList.toggle('hidden', n === qs.length);
-  };
-
-  document.getElementById('jump-unans').onclick = () => {
-    const target = [...app.querySelectorAll('section')].find(sec => !ans[sec.dataset.q]);
-    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  };
-
-  app.querySelectorAll('section').forEach(sec => {
-    sec.querySelectorAll('.opt').forEach(b => b.onclick = () => {
-      sec.querySelectorAll('.opt').forEach(x => x.classList.remove('on'));
-      b.classList.add('on');
-      ans[sec.dataset.q] = b.dataset.v;
-      updateProgress();
-    });
-  });
-
-  document.getElementById('send').onclick = async e => {
-    if (Object.keys(ans).length < qs.length) {
-      document.getElementById('jump-unans').click();
-      return document.getElementById('msg').innerHTML = errBox(`ตอบไปแล้ว ${Object.keys(ans).length} จาก ${qs.length} ข้อ ลองเลือกให้ครบก่อนนะ`);
-    }
-    e.target.disabled = true; e.target.textContent = 'กำลังส่งคำตอบ…';
-    try {
-      await api('saveAnswer', { name: S.name, answers: ans });
-      await syncRound();
-      S.done = true; localStorage.setItem('done', '1'); waiting();
-    } catch (err) {
+  const summary = () => {
+    app.innerHTML = `${head()}
+    <div class="${card} mt-6 text-center py-8 reveal-card">
+      <p class="text-4xl" aria-hidden="true">🎤</p>
+      <h2 class="text-xl font-semibold mt-3">ตอบครบแล้ว</h2>
+      <p class="text-sm text-ink/60 mt-1">พร้อมส่งให้ระบบจับคู่ให้คุณ ${esc(S.name)}</p>
+      <button id="send" class="${primary} mt-6">ส่งคำตอบ</button>
+      <button id="review" type="button" class="mt-3 text-sm text-ink/60 underline">ย้อนกลับไปแก้คำตอบ</button>
+      <div id="msg"></div>
+    </div>`;
+    document.getElementById('review').onclick = () => { i = qs.length - 1; draw(); };
+    document.getElementById('send').onclick = async e => {
+      e.target.disabled = true; e.target.textContent = 'กำลังส่ง…';
       try {
-        const r = await api('getResults');
-        if (r.ready) return showResults(r);
-      } catch (_) {}
-      e.target.disabled = false; e.target.textContent = 'ส่งคำตอบและไปรอลุ้น';
-      document.getElementById('msg').innerHTML = errBox(err.message);
-    }
+        await api('saveAnswer', { name: S.name, answers: ans });
+        await syncRound();
+        try { localStorage.removeItem(KEY); } catch (_) {}
+        S.done = true; localStorage.setItem('done', '1'); waiting();
+      } catch (err) {
+        try { const r = await api('getResults'); if (r.ready) return showResults(r); } catch (_) {}
+        e.target.disabled = false; e.target.textContent = 'ส่งคำตอบ';
+        document.getElementById('msg').innerHTML = errBox(err.message);
+      }
+    };
   };
+
+  const draw = () => {
+    if (i >= qs.length) { const m = qs.findIndex(q => !ans[q.id]); if (m >= 0) i = m; else { save(); return summary(); } }
+    save();
+    const q = qs[i];
+    app.innerHTML = `${head()}
+    <section class="mt-6 reveal-card">
+      <h2 class="text-xl font-semibold leading-snug">${esc(q.text)}</h2>
+      <div class="grid gap-2.5 mt-5">
+        ${q.options.map(o => `<button type="button" class="opt text-left bg-white border border-ink/15 rounded-2xl px-4 py-3.5 ${ans[q.id] === o ? 'on' : ''}" data-v="${esc(o)}">${esc(o)}</button>`).join('')}
+      </div>
+    </section>
+    <div class="flex justify-between items-center mt-6 text-sm">
+      <button type="button" id="back" class="text-ink/60 underline disabled:opacity-30" ${i === 0 ? 'disabled' : ''}>← ย้อนกลับ</button>
+      ${ans[q.id] ? '<button type="button" id="next" class="font-medium">ถัดไป →</button>' : ''}
+    </div>`;
+    app.querySelectorAll('.opt').forEach(b => b.onclick = () => {
+      if (busy) return;
+      busy = true;
+      ans[q.id] = b.dataset.v;
+      app.querySelectorAll('.opt').forEach(x => x.classList.toggle('on', x === b));
+      setTimeout(() => { busy = false; i++; draw(); window.scrollTo(0, 0); }, 220);
+    });
+    document.getElementById('back').onclick = () => { if (!busy && i > 0) { i--; draw(); } };
+    const nx = document.getElementById('next'); if (nx) nx.onclick = () => { if (!busy) { i++; draw(); } };
+  };
+
+  draw();
   window.scrollTo(0, 0);
 }
 
@@ -302,10 +306,10 @@ function waiting() {
 }
 
 /* ---------- แสดงผลลัพธ์ ---------- */
-function groupsHtml(r, me, onlyMine = false, highlightLatest = false, newestFirst = false) {
+function groupsHtml(r, me, onlyMine = false, highlightLatest = false, newestFirst = false, showNo = false) {
   const mine = n => me && n.trim().toLowerCase() === me.trim().toLowerCase();
   // ลำดับการเฉลยเริ่มจาก % มากสุดก่อนไล่ไปถึงกลุ่ม/เศษ
-  const sorted = [...(r.groups || [])].sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
+  const sorted = [...(r.groups || [])].sort((a, b) => (a.no || 0) - (b.no || 0) || (Number(b.score) || 0) - (Number(a.score) || 0));
   const indexed = sorted.map((g, revealOrder) => ({ g, revealOrder }));
   const ordered = newestFirst ? [...indexed].reverse() : indexed;
   const list = onlyMine && me ? ordered.filter(({ g }) => g.members.some(mine)) : ordered;
@@ -314,16 +318,17 @@ function groupsHtml(r, me, onlyMine = false, highlightLatest = false, newestFirs
     return `<div class="${card} mt-4 text-center text-ink/60">ยังไม่พบชื่อ "${esc(me)}" ในรายการที่เปิดอยู่ตอนนี้</div>`;
   }
 
-  return list.map(({ g, revealOrder }) => {
+  const html = list.map(({ g, revealOrder }) => {
     const isMe = g.members.some(mine);
     const isSolo = g.members.length === 1;
     const isTrio = g.members.length >= 3;
     const isNewest = highlightLatest && revealOrder === indexed.length - 1;
     const scoreVal = Math.max(0, Math.min(100, Number(g.score) || 0));
 
-    return `<article class="${card} mt-3 reveal-card ${isMe ? 'ring-2 ring-rose' : ''} ${isNewest ? 'border-rose/30' : ''}">
+    return `<article class="${card} mt-3 ${S.seen.has(gkey(g)) ? '' : 'reveal-card'} ${isMe ? 'ring-2 ring-rose' : ''} ${isNewest ? 'border-rose/30' : ''}">
       <div class="flex items-center justify-between gap-2 mb-2">
         <div class="flex items-center gap-1.5 flex-wrap">
+          ${showNo && g.no ? `<span class="text-[11px] font-semibold bg-ink/10 text-ink/70 px-2 py-0.5 rounded-full">ลำดับเฉลย #${g.no}</span>` : ''}
           ${isNewest ? '<span class="text-[11px] font-semibold bg-rose text-white px-2.5 py-0.5 rounded-full">เพิ่งเปิดล่าสุด</span>' : ''}
           ${isMe ? `<span class="text-[11px] font-semibold ${isSolo ? 'bg-sea/15 text-sea' : 'bg-rose/15 text-rose'} px-2.5 py-0.5 rounded-full">${isSolo ? 'โชว์เดี่ยวของคุณ' : 'แมตช์ของคุณ'}</span>` : ''}
           ${!isMe && isTrio ? '<span class="text-[11px] font-medium bg-ink/10 text-ink/70 px-2 py-0.5 rounded-full">ทีม 3 คน</span>' : ''}
@@ -352,6 +357,8 @@ function groupsHtml(r, me, onlyMine = false, highlightLatest = false, newestFirs
       </details>` : ''}
     </article>`;
   }).join('');
+  list.forEach(({ g }) => S.seen.add(gkey(g)));
+  return html;
 }
 
 function showResults(r) {
@@ -376,13 +383,16 @@ function showResults(r) {
       </div>
       <div class="flex items-center gap-2 shrink-0">
         ${partial ? ringHtml(14) : ''}
-        ${S.name ? `<button type="button" id="mine-btn" class="text-xs px-3 py-2 rounded-xl border ${S.onlyMine ? 'bg-rose text-white border-rose' : 'bg-white border-ink/15'}">${S.onlyMine ? 'ดูทั้งหมด' : 'ของฉัน'}</button>` : ''}
+        ${S.name ? `<div class="inline-flex rounded-xl bg-ink/[0.06] p-0.5 text-xs font-medium">
+          <button type="button" data-mine="0" class="px-3 py-1.5 rounded-[10px] ${!S.onlyMine ? 'bg-white shadow-sm' : 'text-ink/60'}">ทั้งหมด</button>
+          <button type="button" data-mine="1" class="px-3 py-1.5 rounded-[10px] ${S.onlyMine ? 'bg-white shadow-sm' : 'text-ink/60'}">ของฉัน</button>
+        </div>` : ''}
       </div>
     </div>
     <div id="vote-slot"></div>
 
     ${r.groups.length
-      ? groupsHtml(r, S.name, S.onlyMine, hasNewReveal, true)
+      ? groupsHtml(r, S.name, S.onlyMine, hasNewReveal, !!r.settings?.reveal)
       : `<div class="${card} mt-5 text-center py-8">
           <p class="text-4xl float-soft inline-block" aria-hidden="true">🎁</p>
           <p class="font-medium mt-3">กำลังเตรียมเปิดการ์ดคู่แรก…</p>
@@ -398,8 +408,7 @@ function showResults(r) {
 
     syncRings();
     paintVote();
-    const mineBtn = document.getElementById('mine-btn');
-    if (mineBtn) mineBtn.onclick = () => { S.onlyMine = !S.onlyMine; renderBody(); };
+    app.querySelectorAll('[data-mine]').forEach(b => b.onclick = () => { S.onlyMine = b.dataset.mine === '1'; renderBody(); });
     document.getElementById('rs').onclick = e => {
       e.preventDefault(); localStorage.removeItem('done'); S.done = false; S.onlyMine = false; S.lastSeenCount = 0; home();
     };
@@ -420,6 +429,7 @@ function showResults(r) {
 const same = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
 const gkey = g => g.members.join('|');
 const myGroup = () => (S.groups || []).find(g => g.members.some(m => same(m, S.name)));
+const myName = () => { const g = myGroup(); return g ? g.members.find(m => same(m, S.name)) : ''; };
 const candidates = () => { const me = myGroup(); return (S.groups || []).filter(g => g !== me); };
 const medal = i => ['🥇', '🥈', '🥉'][i] || '';
 
@@ -434,6 +444,7 @@ function rankedBoard(res) {
     if (!p || p.points !== x.points || p.c1 !== x.c1 || p.c2 !== x.c2) rank = i + 1;
     x.rank = rank;
   });
+  rows.forEach(x => { x.tie = rows.filter(y => y.rank === x.rank).length > 1; });
   return rows;
 }
 
@@ -441,13 +452,20 @@ function boardHtml(res) {
   const rows = rankedBoard(res);
   const max = Math.max(1, ...rows.map(x => x.points));
   const me = myGroup();
-  return rows.map(x => `<article class="${card} mt-3 reveal-card ${me && x.g === me ? 'ring-2 ring-rose' : ''}">
-    <div class="flex items-center justify-between gap-2">
-      <div class="font-bold text-lg">${medal(x.rank - 1) || x.rank + '.'} ${x.g.members.map(m => esc(m)).join(' <span class="text-rose text-base">♥</span> ')}</div>
-      <div class="text-rose font-bold shrink-0">${x.points} คะแนน</div>
+  const tone = k => k === 1 ? 'bg-amber-400 text-white' : k === 2 ? 'bg-slate-400 text-white' : k === 3 ? 'bg-orange-400 text-white' : 'bg-ink/10 text-ink/70';
+  return rows.map(x => `<article class="${card} mt-3 reveal-card flex items-center gap-3.5 ${me && x.g === me ? 'ring-2 ring-rose' : ''} ${x.rank === 1 ? 'border-2 border-amber-400' : ''}">
+    <div class="shrink-0 w-16 h-16 rounded-full flex flex-col items-center justify-center leading-none ${tone(x.rank)}" aria-label="อันดับ ${x.rank}">
+      <span class="text-[10px] font-medium">อันดับ</span>
+      <span class="text-3xl font-bold mt-0.5">${x.rank}</span>
     </div>
-    <div class="h-2 bg-ink/10 rounded-full overflow-hidden mt-2.5"><div class="bar h-full bg-rose" style="width:${x.points / max * 100}%"></div></div>
-    <p class="text-xs text-ink/60 mt-2">อันดับ 1 × ${x.c1} · อันดับ 2 × ${x.c2} · อันดับ 3 × ${x.c3}</p>
+    <div class="min-w-0 flex-1">
+      ${x.rank === 1 ? '<div class="text-[11px] font-semibold text-amber-600 mb-0.5">🏆 ชนะเลิศ</div>' : ''}
+      <div class="font-bold ${x.rank <= 3 ? 'text-lg' : 'text-base'} leading-snug">${medal(x.rank - 1)} ${x.g.members.map(m => esc(m)).join(' <span class="text-rose text-sm">♥</span> ')}</div>
+      ${x.tie ? `<span class="inline-block text-[11px] font-medium bg-ink/10 text-ink/70 px-2 py-0.5 rounded-full mt-1">เสมออันดับ ${x.rank}</span>` : ''}
+      <div class="h-1.5 bg-ink/10 rounded-full overflow-hidden mt-2"><div class="bar h-full bg-rose" style="width:${x.points / max * 100}%"></div></div>
+      <p class="text-xs text-ink/60 mt-1.5">ได้อันดับ 1 × ${x.c1} · อันดับ 2 × ${x.c2} · อันดับ 3 × ${x.c3}</p>
+    </div>
+    <div class="shrink-0 text-right"><div class="text-2xl font-bold text-rose leading-none">${x.points}</div><div class="text-[11px] text-ink/60 mt-1">คะแนน</div></div>
   </article>`).join('');
 }
 
@@ -466,7 +484,7 @@ function paintVote() {
   const voted = (v.myPicks || []).length > 0;
   el.innerHTML = `<div class="${card} mt-4 text-center">
     <p class="font-semibold">🗳️ เปิดโหวตแล้ว!</p>
-    <p class="text-xs text-ink/60 mt-1">${voted ? 'ทีมคุณโหวตแล้ว แก้ไขได้จนกว่าจะปิดโหวต' : 'เลือก 3 คู่ที่ร้องได้ใจที่สุด (ยกเว้นทีมตัวเอง)'} · โหวตแล้ว ${Number(v.count) || 0} ทีม</p>
+    <p class="text-xs text-ink/60 mt-1">${voted ? 'คุณโหวตแล้ว แก้ไขได้จนกว่าจะปิดโหวต' : 'โหวตเดี่ยวของคุณเอง: เลือก 3 คู่ที่ร้องได้ใจที่สุด (ยกเว้นคู่ตัวเอง)'} · โหวตแล้ว ${Number(v.count) || 0} คน</p>
     <button id="go-vote" class="${primary} mt-3">${voted ? 'แก้ไขโหวต' : 'ไปโหวตเลย'}</button>
   </div>`;
   document.getElementById('go-vote').onclick = voteView;
@@ -474,8 +492,7 @@ function paintVote() {
 
 async function refreshVote() {
   try {
-    const me = myGroup();
-    const v = await api('voteState', { voterKey: me ? gkey(me) : '' });
+    const v = await api('voteState', { voterKey: myName() });
     if (v.phase === 'done') { if (S.vote?.phase !== 'done' || !S.voteRes) S.voteRes = await api('voteResults'); }
     else S.voteRes = null;
     const changed = JSON.stringify(v) !== JSON.stringify(S.vote);
@@ -494,7 +511,7 @@ function voteView() {
     app.innerHTML = `
     <div class="pt-6"><button id="vb" class="text-sm underline text-ink/60">← กลับ</button></div>
     <h1 class="text-2xl font-bold mt-3">โหวตคู่ที่ร้องได้ใจที่สุด</h1>
-    <p class="text-sm text-ink/70 mt-1 leading-relaxed">โหวตในนามทีม <b>${me.members.map(m => esc(m)).join(' &amp; ')}</b><br>
+    <p class="text-sm text-ink/70 mt-1 leading-relaxed">โหวตโดย <b>${esc(myName())}</b> · โหวตเดี่ยวของใครของมัน ไม่ต้องรวมกับคู่ · ไม่ต้องเลือกคู่ตัวเอง<br>
       แตะตามลำดับ: แตะแรก = อันดับ 1 (3 คะแนน) → อันดับ 2 (2 คะแนน) → อันดับ 3 (1 คะแนน) · แตะซ้ำเพื่อยกเลิก</p>
     ${cands.map(g => { const i = picks.indexOf(gkey(g)); return `
       <button type="button" data-k="${esc(gkey(g))}" class="opt w-full text-left ${card} mt-3 flex items-center justify-between gap-3 ${i >= 0 ? 'on' : ''}">
@@ -513,7 +530,7 @@ function voteView() {
     document.getElementById('vs').onclick = async e => {
       e.target.disabled = true; e.target.textContent = 'กำลังส่ง…';
       try {
-        await api('submitVote', { voterKey: gkey(me), picks });
+        await api('submitVote', { voterKey: myName(), picks });
         S.vote = { ...S.vote, myPicks: picks };
         showResults(S.lastRes);
       } catch (err) {
@@ -527,21 +544,30 @@ function voteView() {
   pollSync(async () => { await refreshVote(); if (S.vote?.phase !== 'open') showResults(S.lastRes); }, 4000);
 }
 
+function adminGroupsHtml(r, reveal) {
+  const all = [...(r.groups || [])].sort((a, b) => (a.no || 0) - (b.no || 0));
+  if (!reveal) return groupsHtml({ groups: all }, '', false, false, false, true);
+  const done = all.filter(g => g.no <= r.shown), next = all.filter(g => g.no > r.shown);
+  return (done.length ? `<h3 class="font-medium mt-5">เฉลยแล้ว ${done.length} วง (ล่าสุดอยู่บนสุด)</h3>${groupsHtml({ groups: done }, '', false, false, true, true)}` : '')
+    + (next.length ? `<h3 class="font-medium mt-5">ยังไม่เฉลย ${next.length} วง (เรียงตามลำดับที่จะเฉลย)</h3>${groupsHtml({ groups: next }, '', false, false, false, true)}` : '');
+}
+
 async function loadVoteAdmin(r) {
   const box = document.getElementById('vadm');
   if (!box) return;
   S.adminRes = r;
-  if (!r.ready) { box.innerHTML = ''; return; }
+  if (!r.ready) { box.innerHTML = '<p class="text-sm text-ink/50 mt-10 text-center">ยังไม่ได้ประมวลผลการจับคู่</p>'; return; }
   try {
     const v = await api('voteResults', { pin: S.adminPin });
     S.groups = r.groups;
     const voted = new Set(v.voted || []);
-    const pending = r.groups.filter(g => !voted.has(gkey(g)));
+    const people = r.groups.flatMap(g => g.members);
+    const pending = people.filter(n => !voted.has(n));
     const label = { off: 'ยังไม่เปิดโหวต', open: 'กำลังโหวต', done: 'ปิดโหวตแล้ว · ประกาศผลแล้ว' }[v.phase] || v.phase;
     box.innerHTML = `<h2 class="font-bold mt-6 text-lg">ระบบโหวต</h2>
     <div class="${card} mt-3">
-      <p class="text-sm">สถานะ: <b>${label}</b> · โหวตแล้ว <b class="text-rose">${voted.size}/${r.groups.length}</b> ทีม</p>
-      ${v.phase === 'open' && pending.length ? `<p class="text-xs text-ink/60 mt-1">ยังไม่โหวต: ${pending.map(g => esc(g.members.join(' & '))).join(', ')}</p>` : ''}
+      <p class="text-sm">สถานะ: <b>${label}</b> · โหวตแล้ว <b class="text-rose">${voted.size}/${people.length}</b> คน</p>
+      ${v.phase === 'open' && pending.length ? `<p class="text-xs text-ink/60 mt-1">ยังไม่โหวต: ${pending.map(n => esc(n)).join(', ')}</p>` : ''}
       <div class="grid grid-cols-2 gap-2 mt-3 text-sm">
         <button type="button" data-vp="open" class="${btn} bg-rose text-white !px-2" ${v.phase === 'open' ? 'disabled' : ''}>${v.phase === 'done' ? 'เปิดโหวตอีกครั้ง' : 'เปิดโหวต'}</button>
         <button type="button" data-vp="done" class="${btn} bg-sea text-white !px-2" ${v.phase === 'done' ? 'disabled' : ''}>ปิดโหวต &amp; ประกาศผล</button>
@@ -619,6 +645,8 @@ async function admin() {
     <h1 class="text-2xl font-bold">แผงควบคุมผู้จัดงาน</h1>
     <button type="button" id="lock-btn" class="text-xs text-ink/50 underline">ล็อกหน้านี้</button>
   </div>
+  <nav id="tabs" class="sticky top-0 z-10 mt-3 flex gap-1 bg-[#E9ECF4] rounded-xl p-1"></nav>
+  <div data-pane="players">
   <section class="${card} mt-4">
     <div class="flex justify-between items-baseline">
       <h2 class="font-medium">ผู้ตอบแล้ว <span id="n" class="text-rose font-bold">0</span> คน</h2>
@@ -636,20 +664,31 @@ async function admin() {
       <button id="reset" class="${btn} border border-ink/30 text-sm">รีเซ็ตข้อมูลรอบใหม่</button>
     </div>
   </div>
+  </div>
   <div id="msg"></div>
-  <details class="${card} mt-4">
+  <div data-pane="settings" hidden>
+  <details class="${card} mt-4" open>
     <summary class="font-medium cursor-pointer">ตั้งค่าฟังก์ชัน / คู่ที่ไม่ต้องการ / PIN / QR</summary>
     <div id="sbox"></div>
   </details>
-  <details class="${card} mt-4" id="qwrap">
+  <details class="${card} mt-4" id="qwrap" open>
     <summary class="font-medium cursor-pointer">แก้ไข / สร้างคำถาม</summary>
     <p class="text-sm text-ink/60 mt-2">แก้ได้เฉพาะตอนยังไม่มีคนตอบ (ถ้ามีผู้ตอบแล้วให้รีเซ็ตข้อมูลก่อน)</p>
     <div id="qed"></div>
     <div id="qmsg"></div>
   </details>
-  <div id="vadm"></div>
-  <div id="res"></div>`;
+  </div>
+  <div data-pane="vote" hidden><div id="vadm"></div></div>
+  <div data-pane="reveal" hidden><div id="res"></div></div>`;
 
+  const TABS = [['players', 'ผู้เล่น'], ['reveal', 'เฉลย'], ['vote', 'โหวต'], ['settings', 'ตั้งค่า']];
+  const showTab = t => {
+    sessionStorage.setItem('adminTab', t);
+    document.querySelectorAll('[data-pane]').forEach(el => { el.hidden = el.dataset.pane !== t; });
+    document.getElementById('tabs').innerHTML = TABS.map(([k, l]) => `<button type="button" data-tab="${k}" class="flex-1 py-2 text-sm rounded-lg ${k === t ? 'bg-white shadow-sm font-semibold' : 'text-ink/60'}">${l}</button>`).join('');
+  };
+  document.getElementById('tabs').onclick = e => { const t = e.target.dataset.tab; if (t) showTab(t); };
+  showTab(sessionStorage.getItem('adminTab') || 'players');
   const bad = e => { document.getElementById('msg').innerHTML = errBox(e.message); };
   const nameOpts = () => names.map(n => `<option>${esc(n)}</option>`).join('');
   const field = 'w-full border border-ink/20 rounded-lg px-3 py-2 text-sm mt-1 focus:outline-none focus:ring-2 focus:ring-rose';
@@ -712,7 +751,7 @@ async function admin() {
             <button type="button" data-rv="next" class="${btn} bg-rose text-white !px-2" ${r.shown >= r.total ? 'disabled' : ''}>เฉลยคู่ถัดไป</button>
             <button type="button" data-rv="all" class="${btn} border border-ink/30 !px-2">เฉลยทั้งหมด</button>
             <button type="button" data-rv="reset" class="${btn} border border-ink/30 !px-2">ซ่อนทั้งหมด</button>
-          </div></div>` : ''}${groupsHtml(r, '', false, false, false)}` : '';
+          </div></div>` : ''}${adminGroupsHtml(r, cfg.f.reveal)}` : '<p class="text-sm text-ink/50 mt-10 text-center">ยังไม่ได้ประมวลผลการจับคู่</p>';
     } catch (e) { bad(e); }
   };
 
@@ -903,7 +942,7 @@ async function admin() {
   document.getElementById('run').onclick = async e => {
     if (!confirm('ประมวลผลการจับคู่ตอนนี้? (จะปิดรับคำตอบเพิ่ม)')) return;
     e.target.disabled = true; e.target.textContent = 'กำลังประมวลผล…';
-    try { await api('runMatching', {}); document.getElementById('msg').innerHTML = ''; await load(); }
+    try { await api('runMatching', {}); document.getElementById('msg').innerHTML = ''; await load(); showTab('reveal'); }
     catch (err) { bad(err); }
     e.target.disabled = false; e.target.textContent = 'ประมวลผลการจับคู่';
   };
